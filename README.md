@@ -64,7 +64,9 @@ Standalone (more representative performance than Play-in-Editor):
 | `herd.Sweep` | — | Runs the scaling experiment for the current mode and writes a CSV |
 | `stat Herd` | — | Shows CPU agent simulation and Niagara push time |
 
-Useful engine stats: `stat unit`, `stat fps`, `stat gpu`, `stat Niagara`.
+Useful engine stats: `stat unit`, `stat fps`, `stat Niagara`.
+Engine cvar used as the GPU optimization: `r.RayTracing.Geometry.NiagaraSprites 0` (keeps the sprites out of Lumen's
+ray-tracing scene; about 10 % less GPU time from 100k sprites up).
 
 ## Reproducing the scaling sweep
 
@@ -85,6 +87,8 @@ The CSVs used in the report are in [Docs/Data](Docs/Data).
 - **System 2 (CPU):** within budget up to 10,000 agents (13.6 ms); fails at 20,000 (24.3 ms). Game-thread-bound.
 - **Optimization:** the spatial hash makes the CPU agent simulation 1.9–3.2× faster than brute force.
   The largest herd within budget grows from about 4,000 to about 15,000 agents.
+- **GPU optimization:** excluding the sprites from ray tracing cuts GPU time at 100k from 16.3 to 14.6 ms
+  (frame 18.5 → 17.4 ms). Niagara's own CPU cost at 100k is about 1.5 ms (`stat Niagara`).
 
 ## Repository layout
 

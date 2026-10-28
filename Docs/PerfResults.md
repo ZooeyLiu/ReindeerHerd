@@ -73,7 +73,22 @@ so CPU-side numbers are upper bounds).
   `RayTracingDynamicGeometry` ≈ 4 ms/frame (sprites rebuilt into Lumen's ray-tracing scene every frame).
 - `stat gpu` showed no overlay in this 5.7 standalone build; Insights GPU timers are used instead.
 
+## Second optimization: sprites excluded from ray tracing (GPU)
+
+`r.RayTracing.Geometry.NiagaraSprites 0`, measured back to back with an unthrottled CPU (147–174 % perf during both runs).
+CSVs: `Docs/Data/HerdSweep_GPU_RTon_20261028_152456.csv`, `Docs/Data/HerdSweep_GPU_RToff_20261028_152625.csv`.
+
+| Sprites | GPU on (ms) | GPU off (ms) | Frame on (ms) | Frame off (ms) | GPU saving |
+|---:|---:|---:|---:|---:|---:|
+| 25,000 | 9.0 | 8.3 | 10.8 | 10.7 | 8 % |
+| 50,000 | 11.0 | 10.5 | 13.7 | 13.4 | 5 % |
+| 100,000 | 16.3 | 14.6 | 18.5 | 17.4 | 11 % |
+| 200,000 | 26.1 | 23.4 | 27.8 | 26.0 | 10 % |
+| 400,000 | 44.9 | 39.7 | 46.1 | 41.8 | 12 % |
+| 800,000 | 80.6 | 72.3 | 81.9 | 73.9 | 10 % |
+| 1,600,000 | 154.0 | 138.0 | 155.2 | 139.1 | 10 % |
+
+About 10 % GPU saving from 100k up; 100k still misses the budget (17.4 ms). The earlier throttled test overstated it.
+
 ## Open items
-- Candidate GPU optimization: `r.RayTracing.Geometry.NiagaraSprites 0`. First test (CPU throttled, so only the GPU
-  column is meaningful; CSV in `_invalid_cpu_throttled/`): GPU ms at 100k 16.5 -> 14.4, 400k 43.2 -> 34.6,
-  1.6M 149.8 -> 118.5. Needs a clean re-run before it goes in the report as the measured optimization.
+- 100k GPU herd is 0.8 ms over budget. Next: fewer neighbour reads in the Boids stage, cheaper sprite material.
