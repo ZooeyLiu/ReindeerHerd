@@ -63,8 +63,17 @@ Brute force grows roughly linearly, not quadratically, because each agent stops 
 with the herd spread over a 4,000-unit disc and a 600-unit perception radius, ~1,000 agents are scanned before
 24 are found. Without that cap brute force would be O(N²).
 
+## Where the GPU herd's time goes at 100k (Docs/Figures/Fig3, Fig4)
+
+Captured with `-trace=default,gpu,bookmark -statnamedevents` and `stat Niagara` (CPU was throttled during both,
+so CPU-side numbers are upper bounds).
+- `stat Niagara`: ~0.4 ms game thread + ~1.1 ms render thread (GPU Dispatch Setup 0.55, GPU Emitter Dispatch 0.39,
+  Get Dynamic Mesh Elements 0.18 ms) — within the 4 ms Niagara budget.
+- Insights GPU timers over a 24 s steady-state range: `NiagaraGpuComputeDispatch` (both boids sim stages) ≈ 1 ms/frame;
+  `RayTracingDynamicGeometry` ≈ 4 ms/frame (sprites rebuilt into Lumen's ray-tracing scene every frame).
+- `stat gpu` showed no overlay in this 5.7 standalone build; Insights GPU timers are used instead.
+
 ## Open items
-- `stat gpu` breakdown of the GPU herd at 100k (sim stages vs sprite drawing) — not captured yet (CPU throttled again).
-- GPU herd misses the budget at 100k (18.9 ms); candidate GPU optimization: lower MaxNeighbors per cell / fewer
-  neighbour reads, or cheaper sprite material / smaller sprites (overdraw).
-- Unreal Insights capture (`-trace=default,gpu`) for the report figure.
+- Candidate GPU optimization: `r.RayTracing.Geometry.NiagaraSprites 0`. First test (CPU throttled, so only the GPU
+  column is meaningful; CSV in `_invalid_cpu_throttled/`): GPU ms at 100k 16.5 -> 14.4, 400k 43.2 -> 34.6,
+  1.6M 149.8 -> 118.5. Needs a clean re-run before it goes in the report as the measured optimization.
