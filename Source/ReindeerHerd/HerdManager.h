@@ -97,6 +97,14 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Herd|Gameplay")
 	TArray<TObjectPtr<AActor>> Obstacles;
 
+	// When Obstacles is empty, BeginPlay spawns rocks at these offsets from the HerdManager (between the
+	// CPU herd and the first pen). They are hidden in mode 0 because the GPU boids do not avoid obstacles.
+	UPROPERTY(EditAnywhere, Category = "Herd|Gameplay")
+	TArray<FVector> DefaultObstacleOffsets = { {5500, 1200, 0}, {6200, -1800, 0}, {3500, -2600, 0}, {2500, 2800, 0}, {6000, 3600, 0} };
+
+	UPROPERTY(EditAnywhere, Category = "Herd|Gameplay")
+	float DefaultObstacleRadius = 400.f;
+
 	// --- Benchmark (scaling experiment) ---
 	// Optional: the pawn is moved here and frozen during a sweep so every run uses the same view.
 	UPROPERTY(EditAnywhere, Category = "Herd|Benchmark")
@@ -157,6 +165,7 @@ private:
 	void AddArrivals(int32 Count);
 	void UpdateCamera();
 	void ApplyDogView(class ACharacter* Dog) const;
+	void SpawnDefaultObstacles();
 	void HandleDebugKeys();
 	void ResetPenState();
 	int32 RequiredToPass() const;

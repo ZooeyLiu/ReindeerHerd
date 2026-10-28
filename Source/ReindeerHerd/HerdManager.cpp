@@ -11,6 +11,9 @@
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "DrawDebugHelpers.h"
+#include "Engine/StaticMeshActor.h"
+#include "Components/StaticMeshComponent.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Engine/Engine.h"
 #include "EngineUtils.h"
 #include "HAL/IConsoleManager.h"
@@ -21,6 +24,7 @@
 #include "Misc/Paths.h"
 #include "Misc/Parse.h"
 #include "ProfilingDebugging/MiscTrace.h"
+#include "ProfilingDebugging/CsvProfiler.h"
 #include "RenderTimer.h"
 #include "DynamicRHI.h"
 #include "NiagaraDataInterfaceArrayFunctionLibrary.h"
@@ -119,6 +123,11 @@ void AHerdManager::BeginPlay()
 	bGameOver = false;
 	bWon = false;
 
+	if (Obstacles.Num() == 0)
+	{
+		SpawnDefaultObstacles();
+	}
+
 	AppliedMode = -1; // force the first apply
 	ApplyCvarsIfChanged();
 
@@ -127,6 +136,41 @@ void AHerdManager::BeginPlay()
 	{
 		bAutoSweepPending = true;
 		AutoSweepDelay = 2.f; // let the level finish loading
+	}
+}
+
+void AHerdManager::SpawnDefaultObstacles()
+{
+	UStaticMesh* RockMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
+	UMaterialInterface* RockMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	if (!RockMesh)
+	{
+		return;
+	}
+
+	// The engine cylinder is 100 units wide and tall with its pivot in the middle.
+	const float Height = 300.f;
+	const FVector Scale(DefaultObstacleRadius / 50.f, DefaultObstacleRadius / 50.f, Height / 100.f);
+
+	for (const FVector& Offset : DefaultObstacleOffsets)
+	{
+		const FVector Location = GetActorLocation() + Offset + FVector(0, 0, Height * 0.5f);
+		AStaticMeshActor* Rock = GetWorld()->SpawnActor<AStaticMeshActor>(Location, FRotator::ZeroRotator);
+		if (!Rock)
+		{
+			continue;
+		}
+		UStaticMeshComponent* Mesh = Rock->GetStaticMeshComponent();
+		Mesh->SetMobility(EComponentMobility::Movable);
+		Mesh->SetStaticMesh(RockMesh);
+		Rock->SetActorScale3D(Scale);
+		if (RockMaterial)
+		{
+			UMaterialInstanceDynamic* Mid = UMaterialInstanceDynamic::Create(RockMaterial, Rock);
+			Mid->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.12f, 0.13f, 0.15f));
+			Mesh->SetMaterial(0, Mid);
+		}
+		Obstacles.Add(Rock);
 	}
 }
 
@@ -184,6 +228,16 @@ void AHerdManager::ApplyCvarsIfChanged()
 
 	// Restart the current pen so arrival counts stay fair after a switch.
 	ResetPenState();
+
+	// Only the CPU herd steers around obstacles, so the rocks exist only in mode 1.
+	for (AActor* Obstacle : Obstacles)
+	{
+		if (Obstacle)
+		{
+			Obstacle->SetActorHiddenInGame(WantedMode == 0);
+			Obstacle->SetActorEnableCollision(WantedMode == 1);
+		}
+	}
 
 	if (bModeChanged)
 	{
@@ -483,6 +537,13 @@ void AHerdManager::StartSweep()
 		FString::Printf(TEXT("HerdSweep_%s_%s.csv"), SweepMode == 0 ? TEXT("GPU") : TEXT("CPU"), *Stamp);
 	SweepCsv = TEXT("Mode,Count,SpatialHash,AvgFrameMs,MaxFrameMs,AvgGameThreadMs,AvgRenderThreadMs,AvgGpuMs,AvgAgentSimMs,AvgFPS,Within16_6ms\n");
 
+#if CSV_PROFILER
+	// Per-frame CSV next to the summary: its Exclusive/*/Effects columns are Niagara's CPU time per thread.
+	// Tools/sweep_niagara.py averages them per sweep step using the Sample events below.
+	FCsvProfiler::Get()->BeginCapture(-1, FPaths::ProfilingDir() / TEXT("HerdSweep"),
+		FString::Printf(TEXT("HerdSweepFrames_%s_%s.csv"), SweepMode == 0 ? TEXT("GPU") : TEXT("CPU"), *Stamp));
+#endif
+
 	SweepIndex = 0;
 	BeginSweepStep();
 	UE_LOG(LogTemp, Log, TEXT("herd.Sweep started (mode %d), output: %s"), SweepMode, *SweepFilePath);
@@ -501,7 +562,7 @@ void AHerdManager::BeginSweepStep()
 	SweepSamples = 0;
 	SumFrameMs = MaxFrameMs = SumGameMs = SumRenderMs = SumGpuMs = SumAgentSimMs = 0;
 
-	TRACE_BOOKMARK(TEXT("HerdSweep mode %d count %d"), SweepMode, Count);
+	CSV_EVENT_GLOBAL(TEXT("HerdSweep mode %d count %d"), SweepMode, Count); // also an Insights bookmark
 }
 
 void AHerdManager::TickSweep(float DeltaSeconds)
@@ -519,6 +580,8 @@ void AHerdManager::TickSweep(float DeltaSeconds)
 		{
 			SweepPhase = ESweepPhase::Sample;
 			SweepTimer = SweepSampleSeconds;
+			const TArray<int32>& Counts = SweepMode == 0 ? SimpleSweepCounts : ComplexSweepCounts;
+			CSV_EVENT_GLOBAL(TEXT("SampleBegin %d"), Counts[SweepIndex]);
 		}
 		return;
 	}
@@ -547,6 +610,7 @@ void AHerdManager::FinishSweepStep()
 {
 	const TArray<int32>& Counts = SweepMode == 0 ? SimpleSweepCounts : ComplexSweepCounts;
 	const double N = FMath::Max(1, SweepSamples);
+	CSV_EVENT_GLOBAL(TEXT("SampleEnd %d"), Counts[SweepIndex]);
 	const double AvgFrame = SumFrameMs / N;
 
 	SweepCsv += FString::Printf(TEXT("%s,%d,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.1f,%s\n"),
@@ -574,6 +638,10 @@ void AHerdManager::FinishSweepStep()
 void AHerdManager::EndSweep()
 {
 	SweepPhase = ESweepPhase::None;
+
+#if CSV_PROFILER
+	FCsvProfiler::Get()->EndCapture();
+#endif
 
 	if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
 	{
@@ -622,6 +690,24 @@ void AHerdManager::ShowStatus() const
 	{
 		Info += FString::Printf(TEXT("   |  agent sim %.2f ms (%s)"), AgentSimMs,
 			GHerdSpatialHash != 0 ? TEXT("spatial hash") : TEXT("brute force"));
+
+		// Check on obstacle avoidance: should stay near 0 once the herd has settled.
+		int32 InsideRocks = 0;
+		for (const AActor* Obstacle : Obstacles)
+		{
+			if (!Obstacle)
+			{
+				continue;
+			}
+			FVector Origin, Extent;
+			Obstacle->GetActorBounds(false, Origin, Extent);
+			const float RadiusSq = FMath::Square(FMath::Max(Extent.X, Extent.Y));
+			for (const FVector& P : CpuSim.Positions)
+			{
+				InsideRocks += FVector::DistSquared2D(P, Origin) < RadiusSq ? 1 : 0;
+			}
+		}
+		Info += FString::Printf(TEXT("   |  inside rocks: %d"), InsideRocks);
 	}
 	GEngine->AddOnScreenDebugMessage(/*Key=*/4243, 0.f, FColor::Cyan, Info);
 }
