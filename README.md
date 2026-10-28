@@ -9,7 +9,7 @@ The same herd runs on two Niagara configurations that you can switch between at 
 | --- | --- | --- |
 | Simulation | GPU, velocity-aligned sprites | CPU, mesh renderer (facing velocity) |
 | Scale | 100,000 by default, aerial camera | 2,000 by default, close third-person camera |
-| Behaviour | Boids (separation, alignment, cohesion) with Neighbor Grid 3D + Particle Attribute Reader in two simulation stages; flee from the dog | State machine (graze → spooked → follow leader → penned), perception cone, panic contagion, leaders, obstacle avoidance (C++ `FHerdCpuSim`, pushed to Niagara Array data interfaces) |
+| Behaviour | Boids (separation, alignment, cohesion) with Neighbor Grid 3D + Particle Attribute Reader in two simulation stages; flee from the dog | State machine (graze → spooked → follow leader → penned), perception cone, panic contagion, leaders, obstacle avoidance around rocks (C++ `FHerdCpuSim`, pushed to Niagara Array data interfaces) |
 | Sim → gameplay | Export Particle Data (GPU readback) reports pen arrivals | Arrivals counted in C++; state shown as particle colour |
 | Gameplay → sim | User parameters: DogPosition, DogRadius, PenPosition, PenRadius, PenIndex | Same, plus per-agent position / velocity / state arrays |
 
@@ -72,8 +72,15 @@ ray-tracing scene; about 10 % less GPU time from 100k sprites up).
 
 `herd.Sweep` (or the `-HerdSweep` command-line flag) respawns the herd at each count in
 `SimpleSweepCounts` / `ComplexSweepCounts` (set on the `HerdManager` actor), warms up for 3 s, then averages frame,
-game-thread, render-thread and GPU time over 5 s. An Unreal Insights bookmark marks each step.
-Results go to `Saved/Profiling/HerdSweep/HerdSweep_<GPU|CPU>_<timestamp>.csv`.
+game-thread, render-thread and GPU time over 5 s. Results go to
+`Saved/Profiling/HerdSweep/HerdSweep_<GPU|CPU>_<timestamp>.csv`.
+The sweep also records a per-frame CSV-profiler capture (`HerdSweepFrames_<GPU|CPU>_<timestamp>.csv`) with an event and
+Unreal Insights bookmark at each step. Niagara CPU time per step:
+```
+python Tools/sweep_niagara.py Saved/Profiling/HerdSweep/HerdSweepFrames_GPU_<timestamp>.csv
+```
+Per-system Niagara cost in game: `NiagaraDebugHud 3` (GT / RT / GPU per system), `NiagaraDebugHud 5` (GPU time per
+simulation stage).
 
 ```
 UnrealEditor.exe ReindeerHerd.uproject /Game/HerdLevel -game -windowed -ResX=1920 -ResY=1080 -HerdSweep -ExecCmds="r.SetRes 1920x1080w,herd.Mode 1,herd.SpatialHash 0,r.VSync 0,t.MaxFPS 0"
@@ -88,7 +95,9 @@ The CSVs used in the report are in [Docs/Data](Docs/Data).
 - **Optimization:** the spatial hash makes the CPU agent simulation 1.9–3.2× faster than brute force.
   The largest herd within budget grows from about 4,000 to about 15,000 agents.
 - **GPU optimization:** excluding the sprites from ray tracing cuts GPU time at 100k from 16.3 to 14.6 ms
-  (frame 18.5 → 17.4 ms). Niagara's own CPU cost at 100k is about 1.5 ms (`stat Niagara`).
+  (frame 18.5 → 17.4 ms).
+- **Niagara 4 ms line:** Niagara's own game + render thread time stays under 0.8 ms at every level in both systems.
+  For System 2 the C++ behaviour sim feeding Niagara crosses 4 ms at about 3,000–4,500 agents.
 
 ## Repository layout
 
@@ -101,7 +110,15 @@ Docs/HLSL/                           Custom HLSL used inside the Niagara scratch
 Docs/NiagaraSetup.md                 Step-by-step build notes for both Niagara systems (Chinese)
 Docs/PerfResults.md, Docs/Data/      Sweep results and raw CSVs
 Tools/RunDemo.bat                    Standalone launcher with stat overlay
+Tools/sweep_niagara.py               Niagara CPU time per sweep step from the per-frame CSV
 ```
+
+## Obstacles
+
+If the `HerdManager`'s `Obstacles` list is empty, BeginPlay spawns five grey rock cylinders between the CPU herd and the
+first pen (`DefaultObstacleOffsets`, `DefaultObstacleRadius`). The CPU reindeer steer around them; in mode 0 they are
+hidden because the GPU boids do not avoid obstacles. The status text shows how many reindeer are inside a rock
+(it should stay 0).
 
 ## Known issues
 

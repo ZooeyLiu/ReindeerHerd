@@ -90,5 +90,30 @@ CSVs: `Docs/Data/HerdSweep_GPU_RTon_20261028_152456.csv`, `Docs/Data/HerdSweep_G
 
 About 10 % GPU saving from 100k up; 100k still misses the budget (17.4 ms). The earlier throttled test overstated it.
 
+## Niagara CPU time per level vs the 4 ms line (final runs, unthrottled)
+
+`herd.Sweep` also writes a per-frame CSV-profiler capture (`HerdSweepFrames_<GPU|CPU>_*.csv`) with
+`SampleBegin N` / `SampleEnd N` events. `python Tools/sweep_niagara.py <frames csv>` averages Niagara's exclusive
+time (`Exclusive/*/Effects` and `/Niagara` columns) per step. CPU clock 143–180 % during both runs.
+Data: `Docs/Data/HerdSweep*_final_*.csv`, `Docs/Data/HerdSweepNiagara_<GPU|CPU>_final.csv`.
+
+| GPU sprites | Frame (ms) | Niagara GT+RT (ms) | CPU agents | Frame (ms) | Niagara GT+RT (ms) | C++ agent sim (ms) |
+|---:|---:|---:|---:|---:|---:|---:|
+| 25,000 | 11.0 | 0.18 | 250 | 7.6 | 0.09 | 0.11 |
+| 50,000 | 14.1 | 0.20 | 500 | 8.7 | 0.11 | 0.33 |
+| 100,000 | 18.8 | 0.22 | 1,000 | 8.1 | 0.10 | 0.77 |
+| 200,000 | 27.6 | 0.24 | 2,000 | 8.3 | 0.10 | 1.74 |
+| 400,000 | 45.2 | 0.34 | 5,000 | 8.6 | 0.10 | 4.67 |
+| 800,000 | 81.8 | 0.72 | 10,000 | 12.2 | 0.18 | 9.71 |
+| 1,600,000 | 155.5 | 0.18* | 20,000 | 24.9 | 0.53 | 21.73 |
+
+Niagara itself stays far inside 4 ms; worker threads add 0.1–0.8 ms. *At 1.6M the render-thread value is unreliable
+(GPU-bound at 6 fps). The GPU frame times reproduce the first sweep (100k: 18.8 vs 18.9 ms).
+For System 2 the C++ behaviour sim that feeds Niagara is the real cost and passes 4 ms between 3,000 and 4,500 agents.
+
+Niagara Debugger (`NiagaraDebugHud 3` / `5`, Docs/Figures/Fig5a–c, captured while throttled so CPU values are upper
+bounds): NS_HerdGPU at 100k GT 1.0 / RT 0.17 / GPU 2.0 ms, of which the Boids stage is 1.93 ms and PopulateGrid
+0.01 ms; NS_HerdCPU at 2,000 GT 0.89 / RT 0.38 ms.
+
 ## Open items
 - 100k GPU herd is 0.8 ms over budget. Next: fewer neighbour reads in the Boids stage, cheaper sprite material.
